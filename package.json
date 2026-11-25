@@ -1,0 +1,12 @@
+{
+  "name": "christmas-memory-match",
+  "version": "1.0.0",
+  "description": "Offline-ready Christmas Party Picture Memory Matching Game built with plain HTML, CSS, and vanilla JavaScript.",
+  "main": "index.js",
+  "scripts": {
+    "dev": "node index.js",
+    "start": "node index.js",
+    "build": "node --check index.js && node --check script.js",
+    "lint": "node --check index.js && node --check script.js"
+  }
+}

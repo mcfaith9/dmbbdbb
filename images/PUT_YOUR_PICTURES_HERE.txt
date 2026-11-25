@@ -1,0 +1,18 @@
+Place your own Christmas party pictures inside this "images" folder!
+
+Default expected filenames (customizable in script.js):
+- photo1.jpg
+- photo2.jpg
+- photo3.jpg
+- photo4.jpg
+- photo5.jpg
+- photo6.jpg
+- photo7.jpg
+- photo8.jpg
+- photo9.jpg
+- photo10.jpg
+- photo11.jpg
+- photo12.jpg
+
+You can use any filename or format (.jpg, .jpeg, .png, .webp, .gif) as long as
+the filenames listed in GAME_CONFIG.images inside script.js match the files here.

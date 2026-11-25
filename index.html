@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Christmas Party Memory Match</title>
+  <meta name="description" content="An interactive, projector-friendly Christmas Party Picture Memory Matching Game built with plain HTML, CSS, and vanilla JavaScript.">
+  <meta property="og:title" content="Christmas Party Memory Match">
+  <meta property="og:description" content="An interactive, projector-friendly Christmas Party Picture Memory Matching Game built with plain HTML, CSS, and vanilla JavaScript.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="snow-layer" id="snowLayer" aria-hidden="true"></div>
+
+  <div class="app-shell">
+    <header class="mc-header">
+      <div class="brand">
+        <svg class="brand-icon" viewBox="0 0 32 32" width="28" height="28" aria-hidden="true">
+          <path d="M16 3 L19.2 10.2 L27 11 L21 16.3 L22.7 24 L16 19.9 L9.3 24 L11 16.3 L5 11 L12.8 10.2 Z" fill="#e6b44c" />
+        </svg>
+        <h1 class="brand-title">Christmas Memory Match</h1>
+      </div>
+
+      <div class="hud-stats" aria-live="polite">
+        <span class="stat-item">Moves: <strong id="movesCount" class="tabular">0</strong></span>
+        <span class="stat-sep" aria-hidden="true">·</span>
+        <span class="stat-item">Matched: <strong id="matchedCount" class="tabular">0</strong> / <strong id="totalPairsLabel" class="tabular">6</strong></span>
+        <span class="stat-sep" aria-hidden="true">·</span>
+        <span class="stat-item">Remaining: <strong id="remainingCount" class="tabular">6</strong></span>
+      </div>
+
+      <div class="mc-controls">
+        <label class="pair-select-wrap" for="pairCountSelect">
+          <span class="sr-only">Number of picture pairs</span>
+          <select id="pairCountSelect" class="control-select" aria-label="Number of picture pairs"></select>
+        </label>
+
+        <button type="button" id="soundToggleBtn" class="control-btn" aria-pressed="true" title="Toggle sound effects (Shortcut: M)">
+          Sound: On
+        </button>
+
+        <button type="button" id="setupGuideBtn" class="control-btn" title="View photo folder setup instructions">
+          Photo Setup
+        </button>
+
+        <button type="button" id="restartBtn" class="control-btn control-btn-primary" title="Shuffle and start a new game (Shortcut: R)">
+          Restart Game
+        </button>
+      </div>
+    </header>
+
+    <main class="board-stage">
+      <div id="gameBoard" class="card-grid" role="grid" aria-label="Memory matching card grid"></div>
+    </main>
+  </div>
+
+  <!-- Completion Modal -->
+  <div id="winModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="winTitle" hidden>
+    <div class="modal-card modal-card-win">
+      <div class="win-ornament" aria-hidden="true">
+        <svg viewBox="0 0 64 64" width="56" height="56">
+          <circle cx="32" cy="36" r="22" fill="#c81e2b" stroke="#e6b44c" stroke-width="3" />
+          <rect x="26" y="8" width="12" height="7" rx="2" fill="#e6b44c" />
+          <circle cx="32" cy="6" r="4" fill="none" stroke="#e6b44c" stroke-width="2.5" />
+          <path d="M22 36 L29 43 L43 29" fill="none" stroke="#fffdf7" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </div>
+      <h2 id="winTitle" class="modal-title">Merry Christmas! All Pairs Matched!</h2>
+      <p id="winSummary" class="modal-subtitle">
+        You found all <strong class="tabular">6</strong> matching pairs in <strong class="tabular">0</strong> moves.
+      </p>
+      <div class="modal-actions">
+        <button type="button" id="playAgainBtn" class="control-btn control-btn-primary control-btn-lg">
+          Play Again
+        </button>
+        <button type="button" id="closeWinBtn" class="control-btn control-btn-lg">
+          View Board
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Photo Setup Guide Modal -->
+  <div id="guideModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="guideTitle" hidden>
+    <div class="modal-card modal-card-guide">
+      <div class="modal-header">
+        <h2 id="guideTitle" class="modal-title-sm">How to Add Your Own Pictures</h2>
+        <button type="button" id="closeGuideBtn" class="close-btn" aria-label="Close setup guide">&times;</button>
+      </div>
+      <div class="guide-body">
+        <ol class="guide-steps">
+          <li>Put your party photos inside the <code>images/</code> folder next to <code>index.html</code>.</li>
+          <li>Open <code>script.js</code> in any text editor and update the filenames inside <code>GAME_CONFIG.images</code>.</li>
+          <li>Save and click <strong>Restart Game</strong>. Each picture is automatically duplicated into a matching pair and shuffled.</li>
+        </ol>
+
+        <div class="guide-status-block">
+          <p class="guide-status-heading">Configured Pictures (<span id="loadedCountText" class="tabular">0 / 0</span> detected)</p>
+          <ul id="imageChecklist" class="image-checklist"></ul>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="guideDoneBtn" class="control-btn control-btn-primary">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
