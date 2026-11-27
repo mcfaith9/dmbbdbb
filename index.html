@@ -27,6 +27,8 @@
         <span class="stat-item">Matched: <strong id="matchedCount" class="tabular">0</strong> / <strong id="totalPairsLabel" class="tabular">6</strong></span>
         <span class="stat-sep" aria-hidden="true">·</span>
         <span class="stat-item">Remaining: <strong id="remainingCount" class="tabular">6</strong></span>
+        <span class="stat-sep" aria-hidden="true">·</span>
+        <span class="stat-item">Time: <strong id="timerCount" class="tabular">0:00</strong></span>
       </div>
 
       <div class="mc-controls">
@@ -39,8 +41,8 @@
           Sound: On
         </button>
 
-        <button type="button" id="setupGuideBtn" class="control-btn" title="View photo folder setup instructions">
-          Photo Setup
+        <button type="button" id="leaderboardBtn" class="control-btn" title="View player rankings and scores (Shortcut: L)">
+          Leaderboard
         </button>
 
         <button type="button" id="restartBtn" class="control-btn control-btn-primary" title="Shuffle and start a new game (Shortcut: R)">
@@ -67,11 +69,50 @@
       </div>
       <h2 id="winTitle" class="modal-title">Merry Christmas! All Pairs Matched!</h2>
       <p id="winSummary" class="modal-subtitle">
-        You found all <strong class="tabular">6</strong> matching pairs in <strong class="tabular">0</strong> moves.
+        You found all <strong class="tabular">6</strong> matching pairs in <strong class="tabular">0</strong> attempts.
       </p>
+
+      <div class="win-metrics" aria-label="Completed game results">
+        <div class="win-metric">
+          <span class="win-metric-label">Score</span>
+          <strong id="winScoreValue" class="win-metric-value tabular">0</strong>
+        </div>
+        <div class="win-metric">
+          <span class="win-metric-label">Attempts</span>
+          <strong id="winAttemptsValue" class="win-metric-value tabular">0</strong>
+        </div>
+        <div class="win-metric">
+          <span class="win-metric-label">Time</span>
+          <strong id="winTimeValue" class="win-metric-value tabular">0:00.0</strong>
+        </div>
+        <div class="win-metric">
+          <span class="win-metric-label">Matches</span>
+          <strong id="winMatchesValue" class="win-metric-value tabular">0</strong>
+        </div>
+      </div>
+
+      <form id="winNameForm" class="win-name-form">
+        <label for="playerNameInput" class="win-name-label">Player / Team Name</label>
+        <div class="win-name-row">
+          <input
+            type="text"
+            id="playerNameInput"
+            class="win-name-input"
+            maxlength="32"
+            placeholder="Enter player or team name"
+            autocomplete="off"
+          >
+          <button type="submit" id="saveNameBtn" class="control-btn">Save</button>
+        </div>
+        <p id="saveNameStatus" class="win-save-status" aria-live="polite"></p>
+      </form>
+
       <div class="modal-actions">
         <button type="button" id="playAgainBtn" class="control-btn control-btn-primary control-btn-lg">
           Play Again
+        </button>
+        <button type="button" id="viewLeaderboardBtn" class="control-btn control-btn-lg">
+          Leaderboard
         </button>
         <button type="button" id="closeWinBtn" class="control-btn control-btn-lg">
           View Board
@@ -80,27 +121,43 @@
     </div>
   </div>
 
-  <!-- Photo Setup Guide Modal -->
-  <div id="guideModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="guideTitle" hidden>
-    <div class="modal-card modal-card-guide">
+  <!-- Leaderboard Modal -->
+  <div id="leaderboardModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="leaderboardTitle" hidden>
+    <div class="modal-card modal-card-leaderboard">
       <div class="modal-header">
-        <h2 id="guideTitle" class="modal-title-sm">How to Add Your Own Pictures</h2>
-        <button type="button" id="closeGuideBtn" class="close-btn" aria-label="Close setup guide">&times;</button>
+        <div class="leaderboard-title-wrap">
+          <svg class="leaderboard-trophy" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+            <path d="M7 4h10v5a5 5 0 0 1-10 0V4Zm-3 1h3v3a3 3 0 0 1-3-3Zm13 0h3a3 3 0 0 1-3 3V5Zm-5 9v3m-3 3h6" fill="none" stroke="#e6b44c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <h2 id="leaderboardTitle" class="modal-title-sm">Leaderboard</h2>
+        </div>
+        <button type="button" id="closeLeaderboardBtn" class="close-btn" aria-label="Close leaderboard">&times;</button>
       </div>
-      <div class="guide-body">
-        <ol class="guide-steps">
-          <li>Put your party photos inside the <code>images/</code> folder next to <code>index.html</code>.</li>
-          <li>Open <code>script.js</code> in any text editor and update the filenames inside <code>GAME_CONFIG.images</code>.</li>
-          <li>Save and click <strong>Restart Game</strong>. Each picture is automatically duplicated into a matching pair and shuffled.</li>
-        </ol>
 
-        <div class="guide-status-block">
-          <p class="guide-status-heading">Configured Pictures (<span id="loadedCountText" class="tabular">0 / 0</span> detected)</p>
-          <ul id="imageChecklist" class="image-checklist"></ul>
+      <p class="leaderboard-subtitle">
+        Ranked by highest score, then fewest attempts, then fastest completion time.
+      </p>
+
+      <div id="leaderboardBody" class="leaderboard-body">
+        <div id="leaderboardEmpty" class="leaderboard-empty" hidden>
+          No completed games recorded yet. Finish a match to claim the #1 spot!
+        </div>
+
+        <div id="leaderboardListWrap" class="leaderboard-list-wrap">
+          <div class="lb-row lb-header" aria-hidden="true">
+            <span class="lb-col-rank">Rank</span>
+            <span class="lb-col-player">Player / Team</span>
+            <span class="lb-col-score">Score</span>
+            <span class="lb-col-attempts">Attempts</span>
+            <span class="lb-col-time">Time</span>
+            <span class="lb-col-matches">Matches</span>
+          </div>
+          <ol id="leaderboardList" class="leaderboard-list" aria-label="Player rankings"></ol>
         </div>
       </div>
+
       <div class="modal-actions">
-        <button type="button" id="guideDoneBtn" class="control-btn control-btn-primary">Done</button>
+        <button type="button" id="leaderboardDoneBtn" class="control-btn control-btn-primary">Close</button>
       </div>
     </div>
   </div>

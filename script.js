@@ -47,25 +47,37 @@ const GAME_CONFIG = {
 (function () {
   'use strict';
 
+  const LEADERBOARD_STORAGE_KEY = 'dmbb_dbb_matching_leaderboard_v1';
+
   const els = {
     board: document.getElementById('gameBoard'),
     movesCount: document.getElementById('movesCount'),
     matchedCount: document.getElementById('matchedCount'),
     totalPairsLabel: document.getElementById('totalPairsLabel'),
     remainingCount: document.getElementById('remainingCount'),
+    timerCount: document.getElementById('timerCount'),
     pairSelect: document.getElementById('pairCountSelect'),
     restartBtn: document.getElementById('restartBtn'),
     soundToggleBtn: document.getElementById('soundToggleBtn'),
-    setupGuideBtn: document.getElementById('setupGuideBtn'),
+    leaderboardBtn: document.getElementById('leaderboardBtn'),
     winModal: document.getElementById('winModal'),
     winSummary: document.getElementById('winSummary'),
+    winScoreValue: document.getElementById('winScoreValue'),
+    winAttemptsValue: document.getElementById('winAttemptsValue'),
+    winTimeValue: document.getElementById('winTimeValue'),
+    winMatchesValue: document.getElementById('winMatchesValue'),
+    winNameForm: document.getElementById('winNameForm'),
+    playerNameInput: document.getElementById('playerNameInput'),
+    saveNameStatus: document.getElementById('saveNameStatus'),
     playAgainBtn: document.getElementById('playAgainBtn'),
+    viewLeaderboardBtn: document.getElementById('viewLeaderboardBtn'),
     closeWinBtn: document.getElementById('closeWinBtn'),
-    guideModal: document.getElementById('guideModal'),
-    closeGuideBtn: document.getElementById('closeGuideBtn'),
-    guideDoneBtn: document.getElementById('guideDoneBtn'),
-    imageChecklist: document.getElementById('imageChecklist'),
-    loadedCountText: document.getElementById('loadedCountText'),
+    leaderboardModal: document.getElementById('leaderboardModal'),
+    closeLeaderboardBtn: document.getElementById('closeLeaderboardBtn'),
+    leaderboardDoneBtn: document.getElementById('leaderboardDoneBtn'),
+    leaderboardEmpty: document.getElementById('leaderboardEmpty'),
+    leaderboardListWrap: document.getElementById('leaderboardListWrap'),
+    leaderboardList: document.getElementById('leaderboardList'),
     snowLayer: document.getElementById('snowLayer')
   };
 
@@ -78,7 +90,11 @@ const GAME_CONFIG = {
     mismatchTimer: null,
     soundEnabled: true,
     audioCtx: null,
-    imageStatus: new Map()
+    gameStartTimeMs: null,
+    elapsedMs: 0,
+    timerInterval: null,
+    leaderboardEntries: [],
+    lastCompletedEntryId: null
   };
 
   /* --------------------------------------------------------------------------
@@ -142,7 +158,7 @@ const GAME_CONFIG = {
   }
 
   /* --------------------------------------------------------------------------
-   * Helpers
+   * Helpers & Formatting
    * ------------------------------------------------------------------------ */
   function shuffleArray(items) {
     const arr = items.slice();
@@ -166,6 +182,36 @@ const GAME_CONFIG = {
     return GAME_CONFIG.images.filter(function (name) {
       return typeof name === 'string' && name.trim().length > 0;
     });
+  }
+
+  function formatHudTime(ms) {
+    const totalSeconds = Math.max(0, Math.floor((ms || 0) / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return minutes + ':' + (seconds < 10 ? '0' : '') + seconds;
+  }
+
+  function formatCompletionTime(ms) {
+    const safeMs = Math.max(0, Number(ms) || 0);
+    const totalTenths = Math.floor(safeMs / 100);
+    const tenths = totalTenths % 10;
+    const totalSeconds = Math.floor(totalTenths / 10);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return minutes + ':' + (seconds < 10 ? '0' : '') + seconds + '.' + tenths;
+  }
+
+  function calculateScore(matches, attempts, completionTimeMs) {
+    const safeMatches = Math.max(1, Number(matches) || 1);
+    const safeAttempts = Math.max(safeMatches, Number(attempts) || safeMatches);
+    const completionSec = Math.max(0, Math.round((Number(completionTimeMs) || 0) / 1000));
+
+    const basePoints = safeMatches * 100;
+    const extraAttempts = Math.max(0, safeAttempts - safeMatches);
+    const efficiencyBonus = Math.max(0, safeMatches * 100 - extraAttempts * 25);
+    const speedBonus = Math.max(0, safeMatches * 30 - completionSec * 2);
+
+    return Math.max(safeMatches * 50, basePoints + efficiencyBonus + speedBonus);
   }
 
   function computeGridDimensions(totalCards) {
@@ -235,6 +281,266 @@ const GAME_CONFIG = {
     els.matchedCount.textContent = String(state.matchedPairs);
     els.totalPairsLabel.textContent = String(state.pairCount);
     els.remainingCount.textContent = String(remaining);
+    if (els.timerCount) {
+      els.timerCount.textContent = formatHudTime(state.elapsedMs);
+    }
+  }
+
+  /* --------------------------------------------------------------------------
+   * Game Timer
+   * ------------------------------------------------------------------------ */
+  function startGameTimer() {
+    if (state.gameStartTimeMs !== null) return;
+    state.gameStartTimeMs = Date.now();
+    state.elapsedMs = 0;
+
+    if (state.timerInterval) {
+      clearInterval(state.timerInterval);
+    }
+
+    state.timerInterval = setInterval(function () {
+      if (state.gameStartTimeMs === null) return;
+      state.elapsedMs = Date.now() - state.gameStartTimeMs;
+      if (els.timerCount) {
+        els.timerCount.textContent = formatHudTime(state.elapsedMs);
+      }
+    }, 250);
+  }
+
+  function stopGameTimer() {
+    if (state.gameStartTimeMs !== null) {
+      state.elapsedMs = Date.now() - state.gameStartTimeMs;
+    }
+    if (state.timerInterval) {
+      clearInterval(state.timerInterval);
+      state.timerInterval = null;
+    }
+    if (els.timerCount) {
+      els.timerCount.textContent = formatHudTime(state.elapsedMs);
+    }
+  }
+
+  function resetGameTimer() {
+    if (state.timerInterval) {
+      clearInterval(state.timerInterval);
+      state.timerInterval = null;
+    }
+    state.gameStartTimeMs = null;
+    state.elapsedMs = 0;
+  }
+
+  /* --------------------------------------------------------------------------
+   * Leaderboard Persistence & Ranking
+   * ------------------------------------------------------------------------ */
+  function compareLeaderboardEntries(a, b) {
+    if (b.score !== a.score) {
+      return b.score - a.score;
+    }
+    if (a.attempts !== b.attempts) {
+      return a.attempts - b.attempts;
+    }
+    if (a.completionTimeMs !== b.completionTimeMs) {
+      return a.completionTimeMs - b.completionTimeMs;
+    }
+    return (a.createdAt || 0) - (b.createdAt || 0);
+  }
+
+  function sanitizeEntry(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const matches = Math.max(1, Number(raw.matches) || 1);
+    const totalPairs = Math.max(matches, Number(raw.totalPairs) || matches);
+    const attempts = Math.max(1, Number(raw.attempts) || matches);
+    const completionTimeMs = Math.max(0, Number(raw.completionTimeMs) || 0);
+    const score = Number.isFinite(Number(raw.score))
+      ? Number(raw.score)
+      : calculateScore(matches, attempts, completionTimeMs);
+    const playerName =
+      typeof raw.playerName === 'string' && raw.playerName.trim().length > 0
+        ? raw.playerName.trim().slice(0, 32)
+        : 'Player';
+
+    return {
+      id: typeof raw.id === 'string' && raw.id ? raw.id : 'entry-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+      playerName: playerName,
+      score: score,
+      attempts: attempts,
+      completionTimeMs: completionTimeMs,
+      matches: matches,
+      totalPairs: totalPairs,
+      createdAt: Number(raw.createdAt) || Date.now()
+    };
+  }
+
+  function loadLeaderboard() {
+    try {
+      const stored = window.localStorage.getItem(LEADERBOARD_STORAGE_KEY);
+      if (!stored) {
+        state.leaderboardEntries = [];
+        return;
+      }
+      const parsed = JSON.parse(stored);
+      if (!Array.isArray(parsed)) {
+        state.leaderboardEntries = [];
+        return;
+      }
+      state.leaderboardEntries = parsed
+        .map(sanitizeEntry)
+        .filter(function (entry) {
+          return entry !== null;
+        })
+        .sort(compareLeaderboardEntries);
+    } catch (_err) {
+      state.leaderboardEntries = [];
+    }
+  }
+
+  function saveLeaderboard() {
+    state.leaderboardEntries.sort(compareLeaderboardEntries);
+    try {
+      window.localStorage.setItem(
+        LEADERBOARD_STORAGE_KEY,
+        JSON.stringify(state.leaderboardEntries)
+      );
+    } catch (_err) {
+      // Ignore storage quota/access errors; in-memory leaderboard still works
+    }
+  }
+
+  function recordGameResult(result) {
+    const defaultName = 'Player ' + (state.leaderboardEntries.length + 1);
+    const entry = sanitizeEntry({
+      id: 'entry-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+      playerName: defaultName,
+      score: result.score,
+      attempts: result.attempts,
+      completionTimeMs: result.completionTimeMs,
+      matches: result.matches,
+      totalPairs: result.totalPairs,
+      createdAt: Date.now()
+    });
+
+    state.leaderboardEntries.push(entry);
+    state.lastCompletedEntryId = entry.id;
+    saveLeaderboard();
+    renderLeaderboard();
+    return entry;
+  }
+
+  function updateEntryPlayerName(entryId, newName) {
+    if (!entryId) return false;
+    const trimmed = (newName || '').trim().slice(0, 32);
+    if (!trimmed) return false;
+
+    const target = state.leaderboardEntries.find(function (item) {
+      return item.id === entryId;
+    });
+    if (!target) return false;
+
+    if (target.playerName !== trimmed) {
+      target.playerName = trimmed;
+      saveLeaderboard();
+      renderLeaderboard();
+    }
+    return true;
+  }
+
+  function renderLeaderboard() {
+    if (!els.leaderboardList || !els.leaderboardEmpty || !els.leaderboardListWrap) return;
+
+    const sorted = state.leaderboardEntries.slice().sort(compareLeaderboardEntries);
+    els.leaderboardList.innerHTML = '';
+
+    if (sorted.length === 0) {
+      els.leaderboardEmpty.hidden = false;
+      els.leaderboardListWrap.hidden = true;
+      return;
+    }
+
+    els.leaderboardEmpty.hidden = true;
+    els.leaderboardListWrap.hidden = false;
+
+    sorted.forEach(function (entry, index) {
+      const rank = index + 1;
+      const li = document.createElement('li');
+      li.className = 'lb-row lb-item';
+      if (rank === 1) li.classList.add('lb-rank-1');
+      else if (rank === 2) li.classList.add('lb-rank-2');
+      else if (rank === 3) li.classList.add('lb-rank-3');
+      if (entry.id === state.lastCompletedEntryId) {
+        li.classList.add('is-latest');
+      }
+
+      const rankCol = document.createElement('div');
+      rankCol.className = 'lb-col-rank';
+      const rankBadge = document.createElement('span');
+      rankBadge.className = 'lb-rank-badge tabular';
+      rankBadge.textContent = '#' + rank;
+      rankCol.appendChild(rankBadge);
+
+      const playerCol = document.createElement('div');
+      playerCol.className = 'lb-col-player lb-player-cell';
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'lb-player-name';
+      nameSpan.textContent = entry.playerName;
+      playerCol.appendChild(nameSpan);
+
+      if (entry.id === state.lastCompletedEntryId) {
+        const latestTag = document.createElement('span');
+        latestTag.className = 'lb-latest-tag';
+        latestTag.textContent = 'Latest';
+        playerCol.appendChild(latestTag);
+      }
+
+      const scoreCol = document.createElement('div');
+      scoreCol.className = 'lb-col-score tabular';
+      const scoreLabel = document.createElement('span');
+      scoreLabel.className = 'lb-cell-label';
+      scoreLabel.textContent = 'Score';
+      const scoreVal = document.createElement('span');
+      scoreVal.className = 'lb-score-val';
+      scoreVal.textContent = entry.score.toLocaleString();
+      scoreCol.appendChild(scoreLabel);
+      scoreCol.appendChild(scoreVal);
+
+      const attemptsCol = document.createElement('div');
+      attemptsCol.className = 'lb-col-attempts tabular';
+      const attemptsLabel = document.createElement('span');
+      attemptsLabel.className = 'lb-cell-label';
+      attemptsLabel.textContent = 'Attempts';
+      const attemptsVal = document.createElement('span');
+      attemptsVal.textContent = String(entry.attempts);
+      attemptsCol.appendChild(attemptsLabel);
+      attemptsCol.appendChild(attemptsVal);
+
+      const timeCol = document.createElement('div');
+      timeCol.className = 'lb-col-time tabular';
+      const timeLabel = document.createElement('span');
+      timeLabel.className = 'lb-cell-label';
+      timeLabel.textContent = 'Time';
+      const timeVal = document.createElement('span');
+      timeVal.textContent = formatCompletionTime(entry.completionTimeMs);
+      timeCol.appendChild(timeLabel);
+      timeCol.appendChild(timeVal);
+
+      const matchesCol = document.createElement('div');
+      matchesCol.className = 'lb-col-matches tabular';
+      const matchesLabel = document.createElement('span');
+      matchesLabel.className = 'lb-cell-label';
+      matchesLabel.textContent = 'Matches';
+      const matchesVal = document.createElement('span');
+      matchesVal.textContent = entry.matches + '/' + entry.totalPairs;
+      matchesCol.appendChild(matchesLabel);
+      matchesCol.appendChild(matchesVal);
+
+      li.appendChild(rankCol);
+      li.appendChild(playerCol);
+      li.appendChild(scoreCol);
+      li.appendChild(attemptsCol);
+      li.appendChild(timeCol);
+      li.appendChild(matchesCol);
+
+      els.leaderboardList.appendChild(li);
+    });
   }
 
   /* --------------------------------------------------------------------------
@@ -287,16 +593,14 @@ const GAME_CONFIG = {
     img.draggable = false;
 
     img.addEventListener('load', function () {
-      state.imageStatus.set(cardData.filename, 'found');
       front.classList.remove('is-missing-image');
     });
 
     img.addEventListener('error', function () {
-      state.imageStatus.set(cardData.filename, 'missing');
       front.classList.add('is-missing-image');
     });
 
-    // Clean fallback if the user has not dropped their image into images/ yet
+    // Clean fallback if an image is missing
     const fallback = document.createElement('div');
     fallback.className = 'card-fallback';
 
@@ -339,6 +643,7 @@ const GAME_CONFIG = {
       state.mismatchTimer = null;
     }
 
+    resetGameTimer();
     hideWinModal();
 
     const allImages = getConfiguredImages();
@@ -381,6 +686,8 @@ const GAME_CONFIG = {
       return;
     }
 
+    startGameTimer();
+
     cardEl.classList.add('is-flipped');
     cardEl.setAttribute('aria-label', 'Card ' + cardEl.dataset.cardNumber + ', revealed');
     state.flippedCards.push(cardEl);
@@ -410,9 +717,23 @@ const GAME_CONFIG = {
       updateHud();
 
       if (state.matchedPairs === state.pairCount) {
+        stopGameTimer();
+        const completionTimeMs = state.elapsedMs;
+        const attempts = state.moves;
+        const matches = state.matchedPairs;
+        const totalPairs = state.pairCount;
+        const score = calculateScore(matches, attempts, completionTimeMs);
+        const savedEntry = recordGameResult({
+          score: score,
+          attempts: attempts,
+          completionTimeMs: completionTimeMs,
+          matches: matches,
+          totalPairs: totalPairs
+        });
+
         setTimeout(function () {
           playWinSound();
-          showWinModal();
+          showWinModal(savedEntry);
         }, 380);
       } else {
         playMatchSound();
@@ -434,80 +755,49 @@ const GAME_CONFIG = {
   }
 
   /* --------------------------------------------------------------------------
-   * Modals & Setup Checklist
+   * Modals
    * ------------------------------------------------------------------------ */
-  function showWinModal() {
+  function showWinModal(entry) {
     els.winSummary.innerHTML =
       'You found all <strong class="tabular">' +
-      state.pairCount +
+      entry.matches +
       '</strong> matching pairs in <strong class="tabular">' +
-      state.moves +
-      '</strong> moves!';
+      entry.attempts +
+      '</strong> attempts!';
+    els.winScoreValue.textContent = entry.score.toLocaleString();
+    els.winAttemptsValue.textContent = String(entry.attempts);
+    els.winTimeValue.textContent = formatCompletionTime(entry.completionTimeMs);
+    els.winMatchesValue.textContent = entry.matches + '/' + entry.totalPairs;
+
+    els.playerNameInput.value = entry.playerName;
+    els.saveNameStatus.textContent = 'Result saved to Leaderboard.';
     els.winModal.hidden = false;
-    els.playAgainBtn.focus();
+    els.playerNameInput.focus();
+    els.playerNameInput.select();
+  }
+
+  function syncCurrentPlayerName() {
+    if (!els.winModal || els.winModal.hidden || !state.lastCompletedEntryId || !els.playerNameInput) return;
+    const typed = els.playerNameInput.value.trim();
+    if (typed) {
+      updateEntryPlayerName(state.lastCompletedEntryId, typed);
+    }
   }
 
   function hideWinModal() {
+    syncCurrentPlayerName();
     els.winModal.hidden = true;
   }
 
-  function probeConfiguredImages(callback) {
-    const filenames = getConfiguredImages();
-    if (filenames.length === 0) {
-      callback();
-      return;
-    }
-
-    let completed = 0;
-    filenames.forEach(function (filename) {
-      const tester = new Image();
-      tester.onload = function () {
-        state.imageStatus.set(filename, 'found');
-        completed += 1;
-        if (completed === filenames.length) callback();
-      };
-      tester.onerror = function () {
-        state.imageStatus.set(filename, 'missing');
-        completed += 1;
-        if (completed === filenames.length) callback();
-      };
-      tester.src = buildImagePath(filename);
-    });
+  function openLeaderboardModal() {
+    syncCurrentPlayerName();
+    renderLeaderboard();
+    els.leaderboardModal.hidden = false;
+    els.closeLeaderboardBtn.focus();
   }
 
-  function renderImageChecklist() {
-    const filenames = getConfiguredImages();
-    els.imageChecklist.innerHTML = '';
-
-    let foundCount = 0;
-    filenames.forEach(function (filename) {
-      const status = state.imageStatus.get(filename) || 'missing';
-      if (status === 'found') foundCount += 1;
-
-      const li = document.createElement('li');
-      const nameSpan = document.createElement('span');
-      nameSpan.textContent = filename;
-
-      const statusSpan = document.createElement('span');
-      statusSpan.className = status === 'found' ? 'status-found' : 'status-missing';
-      statusSpan.textContent = status === 'found' ? 'Ready' : 'Not added';
-
-      li.appendChild(nameSpan);
-      li.appendChild(statusSpan);
-      els.imageChecklist.appendChild(li);
-    });
-
-    els.loadedCountText.textContent = foundCount + ' / ' + filenames.length;
-  }
-
-  function openGuideModal() {
-    renderImageChecklist();
-    els.guideModal.hidden = false;
-    probeConfiguredImages(renderImageChecklist);
-  }
-
-  function closeGuideModal() {
-    els.guideModal.hidden = true;
+  function closeLeaderboardModal() {
+    els.leaderboardModal.hidden = true;
   }
 
   /* --------------------------------------------------------------------------
@@ -550,34 +840,71 @@ const GAME_CONFIG = {
     }
   });
 
+  els.winNameForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    const typed = els.playerNameInput.value.trim();
+    if (!typed) {
+      els.saveNameStatus.textContent = 'Please enter a player or team name.';
+      els.playerNameInput.focus();
+      return;
+    }
+    if (updateEntryPlayerName(state.lastCompletedEntryId, typed)) {
+      els.saveNameStatus.textContent = 'Saved as "' + typed + '" on the Leaderboard!';
+    }
+  });
+
   els.restartBtn.addEventListener('click', startNewGame);
   els.playAgainBtn.addEventListener('click', startNewGame);
   els.closeWinBtn.addEventListener('click', hideWinModal);
+  els.viewLeaderboardBtn.addEventListener('click', function () {
+    hideWinModal();
+    openLeaderboardModal();
+  });
   els.soundToggleBtn.addEventListener('click', toggleSound);
 
-  els.setupGuideBtn.addEventListener('click', openGuideModal);
-  els.closeGuideBtn.addEventListener('click', closeGuideModal);
-  els.guideDoneBtn.addEventListener('click', closeGuideModal);
+  els.leaderboardBtn.addEventListener('click', openLeaderboardModal);
+  els.closeLeaderboardBtn.addEventListener('click', closeLeaderboardModal);
+  els.leaderboardDoneBtn.addEventListener('click', closeLeaderboardModal);
 
   els.winModal.addEventListener('click', function (e) {
     if (e.target === els.winModal) hideWinModal();
   });
 
-  els.guideModal.addEventListener('click', function (e) {
-    if (e.target === els.guideModal) closeGuideModal();
+  els.leaderboardModal.addEventListener('click', function (e) {
+    if (e.target === els.leaderboardModal) closeLeaderboardModal();
   });
 
   document.addEventListener('keydown', function (e) {
+    const tag = e.target && e.target.tagName;
+    const isTyping =
+      tag === 'INPUT' ||
+      tag === 'TEXTAREA' ||
+      tag === 'SELECT' ||
+      (e.target && e.target.isContentEditable);
+
     if (e.key === 'Escape') {
       hideWinModal();
-      closeGuideModal();
-    } else if ((e.key === 'r' || e.key === 'R') && !e.metaKey && !e.ctrlKey) {
+      closeLeaderboardModal();
+      return;
+    }
+
+    if (isTyping) return;
+
+    if ((e.key === 'r' || e.key === 'R') && !e.metaKey && !e.ctrlKey) {
       startNewGame();
     } else if ((e.key === 'm' || e.key === 'M') && !e.metaKey && !e.ctrlKey) {
       toggleSound();
+    } else if ((e.key === 'l' || e.key === 'L') && !e.metaKey && !e.ctrlKey) {
+      if (els.leaderboardModal.hidden) {
+        openLeaderboardModal();
+      } else {
+        closeLeaderboardModal();
+      }
     }
   });
 
+  loadLeaderboard();
+  renderLeaderboard();
   populatePairOptions();
   createSnowflakes();
   startNewGame();
