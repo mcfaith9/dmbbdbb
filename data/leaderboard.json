@@ -1,3 +1,27 @@
 {
-  "entries": []
+  "entries": [
+    {
+      "id": "entry-5f4a3305-e426-48ff-b15d-f7f7214e4c1f",
+      "playerName": "Marc Pogi",
+      "score": 1217,
+      "attempts": 11,
+      "completionTimeMs": 19134,
+      "matches": 6,
+      "totalPairs": 6,
+      "createdAt": 1795760148352,
+      "updatedAt": 1795760155485
+    },
+    {
+      "id": "entry-65289705-f938-4822-94ca-0b46ce337512",
+      "playerName": "Marc Test",
+      "score": 769,
+      "attempts": 9,
+      "completionTimeMs": 12653,
+      "matches": 4,
+      "totalPairs": 4,
+      "createdAt": 1795760259145,
+      "updatedAt": 1795760267535
+    }
+  ],
+  "updatedAt": "2026-11-27T06:50:33.628Z"
 }
