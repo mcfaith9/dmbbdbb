@@ -48,6 +48,9 @@ const GAME_CONFIG = {
   'use strict';
 
   const LEADERBOARD_STORAGE_KEY = 'dmbb_dbb_matching_leaderboard_v1';
+  const SYNC_QUEUE_STORAGE_KEY = 'dmbb_dbb_matching_sync_queue_v1';
+  const LEADERBOARD_API_URL = '/api/leaderboard';
+  const SYNC_RETRY_INTERVAL_MS = 15000;
 
   const els = {
     board: document.getElementById('gameBoard'),
@@ -78,6 +81,8 @@ const GAME_CONFIG = {
     leaderboardEmpty: document.getElementById('leaderboardEmpty'),
     leaderboardListWrap: document.getElementById('leaderboardListWrap'),
     leaderboardList: document.getElementById('leaderboardList'),
+    syncStatusBadge: document.getElementById('syncStatusBadge'),
+    syncStatusText: document.getElementById('syncStatusText'),
     snowLayer: document.getElementById('snowLayer')
   };
 
@@ -94,7 +99,11 @@ const GAME_CONFIG = {
     elapsedMs: 0,
     timerInterval: null,
     leaderboardEntries: [],
-    lastCompletedEntryId: null
+    pendingSyncQueue: [],
+    lastCompletedEntryId: null,
+    syncStatus: 'offline',
+    activeSyncPromise: null,
+    syncRetryTimer: null
   };
 
   /* --------------------------------------------------------------------------
@@ -330,8 +339,15 @@ const GAME_CONFIG = {
   }
 
   /* --------------------------------------------------------------------------
-   * Leaderboard Persistence & Ranking
+   * Leaderboard Persistence, Ranking & GitHub Sync
    * ------------------------------------------------------------------------ */
+  function generateEntryId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+      return 'entry-' + window.crypto.randomUUID();
+    }
+    return 'entry-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
+  }
+
   function compareLeaderboardEntries(a, b) {
     if (b.score !== a.score) {
       return b.score - a.score;
@@ -358,17 +374,49 @@ const GAME_CONFIG = {
       typeof raw.playerName === 'string' && raw.playerName.trim().length > 0
         ? raw.playerName.trim().slice(0, 32)
         : 'Player';
+    const createdAt = Number(raw.createdAt) || Date.now();
+    const updatedAt = Number(raw.updatedAt) >= createdAt ? Number(raw.updatedAt) : createdAt;
 
     return {
-      id: typeof raw.id === 'string' && raw.id ? raw.id : 'entry-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+      id: typeof raw.id === 'string' && raw.id ? raw.id : generateEntryId(),
       playerName: playerName,
-      score: score,
-      attempts: attempts,
-      completionTimeMs: completionTimeMs,
-      matches: matches,
-      totalPairs: totalPairs,
-      createdAt: Number(raw.createdAt) || Date.now()
+      score: Math.round(score),
+      attempts: Math.round(attempts),
+      completionTimeMs: Math.round(completionTimeMs),
+      matches: Math.round(matches),
+      totalPairs: Math.round(totalPairs),
+      createdAt: Math.floor(createdAt),
+      updatedAt: Math.floor(updatedAt)
     };
+  }
+
+  function mergeEntryLists(baseList, incomingList) {
+    const byId = new Map();
+    (baseList || []).forEach(function (item) {
+      const clean = sanitizeEntry(item);
+      if (clean) byId.set(clean.id, clean);
+    });
+    (incomingList || []).forEach(function (item) {
+      const clean = sanitizeEntry(item);
+      if (!clean) return;
+      const existing = byId.get(clean.id);
+      if (!existing) {
+        byId.set(clean.id, clean);
+      } else if (clean.updatedAt >= existing.updatedAt) {
+        byId.set(clean.id, {
+          id: existing.id,
+          playerName: clean.playerName,
+          score: existing.score,
+          attempts: existing.attempts,
+          completionTimeMs: existing.completionTimeMs,
+          matches: existing.matches,
+          totalPairs: existing.totalPairs,
+          createdAt: existing.createdAt,
+          updatedAt: clean.updatedAt
+        });
+      }
+    });
+    return Array.from(byId.values()).sort(compareLeaderboardEntries);
   }
 
   function loadLeaderboard() {
@@ -383,12 +431,7 @@ const GAME_CONFIG = {
         state.leaderboardEntries = [];
         return;
       }
-      state.leaderboardEntries = parsed
-        .map(sanitizeEntry)
-        .filter(function (entry) {
-          return entry !== null;
-        })
-        .sort(compareLeaderboardEntries);
+      state.leaderboardEntries = mergeEntryLists([], parsed);
     } catch (_err) {
       state.leaderboardEntries = [];
     }
@@ -406,23 +449,263 @@ const GAME_CONFIG = {
     }
   }
 
+  function loadSyncQueue() {
+    try {
+      const stored = window.localStorage.getItem(SYNC_QUEUE_STORAGE_KEY);
+      if (!stored) {
+        state.pendingSyncQueue = [];
+        return;
+      }
+      const parsed = JSON.parse(stored);
+      if (!Array.isArray(parsed)) {
+        state.pendingSyncQueue = [];
+        return;
+      }
+      state.pendingSyncQueue = mergeEntryLists([], parsed);
+    } catch (_err) {
+      state.pendingSyncQueue = [];
+    }
+  }
+
+  function saveSyncQueue() {
+    try {
+      window.localStorage.setItem(
+        SYNC_QUEUE_STORAGE_KEY,
+        JSON.stringify(state.pendingSyncQueue)
+      );
+    } catch (_err) {
+      // Ignore storage errors
+    }
+  }
+
+  function updateSyncStatusUI() {
+    if (!els.syncStatusBadge || !els.syncStatusText) return;
+
+    els.syncStatusBadge.classList.remove(
+      'sync-status-synced',
+      'sync-status-syncing',
+      'sync-status-offline'
+    );
+
+    if (state.syncStatus === 'syncing') {
+      els.syncStatusBadge.classList.add('sync-status-syncing');
+      els.syncStatusText.textContent = 'Syncing';
+    } else if (state.syncStatus === 'synced') {
+      els.syncStatusBadge.classList.add('sync-status-synced');
+      els.syncStatusText.textContent = 'Synced';
+    } else {
+      els.syncStatusBadge.classList.add('sync-status-offline');
+      const queuedCount = state.pendingSyncQueue.length;
+      els.syncStatusText.textContent =
+        queuedCount > 0 ? 'Offline (' + queuedCount + ' queued)' : 'Offline';
+    }
+  }
+
+  function setSyncStatus(status) {
+    state.syncStatus = status;
+    updateSyncStatusUI();
+  }
+
+  function scheduleSyncRetry() {
+    if (state.syncRetryTimer || state.pendingSyncQueue.length === 0) return;
+    state.syncRetryTimer = setTimeout(function () {
+      state.syncRetryTimer = null;
+      if (state.pendingSyncQueue.length > 0) {
+        refreshLeaderboardFromServer();
+      }
+    }, SYNC_RETRY_INTERVAL_MS);
+  }
+
+  function clearSyncRetry() {
+    if (state.syncRetryTimer) {
+      clearTimeout(state.syncRetryTimer);
+      state.syncRetryTimer = null;
+    }
+  }
+
+  function enqueueEntryForSync(entry) {
+    const clean = sanitizeEntry(entry);
+    if (!clean) return;
+    const filtered = state.pendingSyncQueue.filter(function (item) {
+      return item.id !== clean.id;
+    });
+    filtered.push(clean);
+    state.pendingSyncQueue = filtered;
+    saveSyncQueue();
+    updateSyncStatusUI();
+  }
+
+  function applyServerEntries(remoteEntries) {
+    state.leaderboardEntries = mergeEntryLists(remoteEntries, state.pendingSyncQueue);
+    saveLeaderboard();
+    renderLeaderboard();
+  }
+
+  function flushSyncQueue() {
+    if (state.pendingSyncQueue.length === 0) {
+      return Promise.resolve(true);
+    }
+
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setSyncStatus('offline');
+      scheduleSyncRetry();
+      return Promise.resolve(false);
+    }
+
+    if (state.activeSyncPromise) {
+      return state.activeSyncPromise.then(function () {
+        if (state.pendingSyncQueue.length > 0) {
+          return flushSyncQueue();
+        }
+        return true;
+      });
+    }
+
+    const batch = state.pendingSyncQueue.slice();
+    const sentVersions = new Map();
+    batch.forEach(function (item) {
+      sentVersions.set(item.id, item.updatedAt);
+    });
+
+    setSyncStatus('syncing');
+
+    state.activeSyncPromise = fetch(LEADERBOARD_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ entries: batch })
+    })
+      .then(function (response) {
+        return response
+          .json()
+          .catch(function () {
+            return {};
+          })
+          .then(function (data) {
+            if (!response.ok || !data || !data.ok) {
+              throw new Error((data && data.error) || 'Sync failed');
+            }
+            return data;
+          });
+      })
+      .then(function (data) {
+        const syncedIdSet = new Set(Array.isArray(data.syncedIds) ? data.syncedIds : []);
+        state.pendingSyncQueue = state.pendingSyncQueue.filter(function (item) {
+          if (!syncedIdSet.has(item.id)) return true;
+          // Keep in queue if the user edited the name while this upload was in flight
+          return item.updatedAt > (sentVersions.get(item.id) || 0);
+        });
+        saveSyncQueue();
+
+        if (Array.isArray(data.entries)) {
+          applyServerEntries(data.entries);
+        }
+
+        if (state.pendingSyncQueue.length === 0) {
+          clearSyncRetry();
+          setSyncStatus('synced');
+          if (els.winModal && !els.winModal.hidden && els.saveNameStatus) {
+            els.saveNameStatus.textContent = 'Synced to shared GitHub Leaderboard.';
+          }
+          return true;
+        }
+
+        // Flush any newer edits made mid-flight
+        state.activeSyncPromise = null;
+        return flushSyncQueue();
+      })
+      .catch(function () {
+        setSyncStatus('offline');
+        scheduleSyncRetry();
+        if (els.winModal && !els.winModal.hidden && els.saveNameStatus) {
+          els.saveNameStatus.textContent = 'Saved locally. Will sync when connection is available.';
+        }
+        return false;
+      })
+      .finally(function () {
+        state.activeSyncPromise = null;
+      });
+
+    return state.activeSyncPromise;
+  }
+
+  function refreshLeaderboardFromServer() {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setSyncStatus('offline');
+      if (state.pendingSyncQueue.length > 0) scheduleSyncRetry();
+      return Promise.resolve(false);
+    }
+
+    const preFlush = state.pendingSyncQueue.length > 0 ? flushSyncQueue() : Promise.resolve(true);
+
+    return preFlush.then(function (flushedOk) {
+      if (state.pendingSyncQueue.length > 0 && !flushedOk) {
+        setSyncStatus('offline');
+        scheduleSyncRetry();
+        return false;
+      }
+
+      setSyncStatus('syncing');
+      return fetch(LEADERBOARD_API_URL, {
+        method: 'GET',
+        cache: 'no-store'
+      })
+        .then(function (response) {
+          return response
+            .json()
+            .catch(function () {
+              return {};
+            })
+            .then(function (data) {
+              if (!response.ok || !data || !data.ok) {
+                throw new Error((data && data.error) || 'Fetch failed');
+              }
+              return data;
+            });
+        })
+        .then(function (data) {
+          if (Array.isArray(data.entries)) {
+            applyServerEntries(data.entries);
+          }
+          if (state.pendingSyncQueue.length > 0) {
+            setSyncStatus('offline');
+            scheduleSyncRetry();
+          } else {
+            clearSyncRetry();
+            setSyncStatus('synced');
+          }
+          return true;
+        })
+        .catch(function () {
+          setSyncStatus('offline');
+          if (state.pendingSyncQueue.length > 0) scheduleSyncRetry();
+          return false;
+        });
+    });
+  }
+
   function recordGameResult(result) {
+    const now = Date.now();
     const defaultName = 'Player ' + (state.leaderboardEntries.length + 1);
     const entry = sanitizeEntry({
-      id: 'entry-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+      id: generateEntryId(),
       playerName: defaultName,
       score: result.score,
       attempts: result.attempts,
       completionTimeMs: result.completionTimeMs,
       matches: result.matches,
       totalPairs: result.totalPairs,
-      createdAt: Date.now()
+      createdAt: now,
+      updatedAt: now
     });
 
-    state.leaderboardEntries.push(entry);
+    state.leaderboardEntries = mergeEntryLists(state.leaderboardEntries, [entry]);
     state.lastCompletedEntryId = entry.id;
     saveLeaderboard();
     renderLeaderboard();
+    enqueueEntryForSync(entry);
+    flushSyncQueue();
     return entry;
   }
 
@@ -438,8 +721,11 @@ const GAME_CONFIG = {
 
     if (target.playerName !== trimmed) {
       target.playerName = trimmed;
+      target.updatedAt = Date.now();
       saveLeaderboard();
       renderLeaderboard();
+      enqueueEntryForSync(target);
+      flushSyncQueue();
     }
     return true;
   }
@@ -770,7 +1056,13 @@ const GAME_CONFIG = {
     els.winMatchesValue.textContent = entry.matches + '/' + entry.totalPairs;
 
     els.playerNameInput.value = entry.playerName;
-    els.saveNameStatus.textContent = 'Result saved to Leaderboard.';
+    if (state.syncStatus === 'synced' && state.pendingSyncQueue.length === 0) {
+      els.saveNameStatus.textContent = 'Synced to shared GitHub Leaderboard.';
+    } else if (state.syncStatus === 'syncing') {
+      els.saveNameStatus.textContent = 'Saved locally · Syncing to shared Leaderboard...';
+    } else {
+      els.saveNameStatus.textContent = 'Saved locally · Will sync when online.';
+    }
     els.winModal.hidden = false;
     els.playerNameInput.focus();
     els.playerNameInput.select();
@@ -792,8 +1084,10 @@ const GAME_CONFIG = {
   function openLeaderboardModal() {
     syncCurrentPlayerName();
     renderLeaderboard();
+    updateSyncStatusUI();
     els.leaderboardModal.hidden = false;
     els.closeLeaderboardBtn.focus();
+    refreshLeaderboardFromServer();
   }
 
   function closeLeaderboardModal() {
@@ -903,9 +1197,20 @@ const GAME_CONFIG = {
     }
   });
 
+  window.addEventListener('online', function () {
+    refreshLeaderboardFromServer();
+  });
+
+  window.addEventListener('offline', function () {
+    setSyncStatus('offline');
+  });
+
   loadLeaderboard();
+  loadSyncQueue();
   renderLeaderboard();
+  updateSyncStatusUI();
   populatePairOptions();
   createSnowflakes();
   startNewGame();
+  refreshLeaderboardFromServer();
 })();

@@ -134,9 +134,15 @@
         <button type="button" id="closeLeaderboardBtn" class="close-btn" aria-label="Close leaderboard">&times;</button>
       </div>
 
-      <p class="leaderboard-subtitle">
-        Ranked by highest score, then fewest attempts, then fastest completion time.
-      </p>
+      <div class="leaderboard-meta-row">
+        <p class="leaderboard-subtitle">
+          Ranked by highest score, then fewest attempts, then fastest completion time.
+        </p>
+        <div id="syncStatusBadge" class="sync-status sync-status-offline" role="status" aria-live="polite">
+          <span class="sync-status-dot" aria-hidden="true"></span>
+          <span id="syncStatusText">Offline</span>
+        </div>
+      </div>
 
       <div id="leaderboardBody" class="leaderboard-body">
         <div id="leaderboardEmpty" class="leaderboard-empty" hidden>
