@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Christmas Party Memory Match</title>
   <meta name="description" content="An interactive, projector-friendly Christmas Party Picture Memory Matching Game built with plain HTML, CSS, and vanilla JavaScript.">
   <meta property="og:title" content="Christmas Party Memory Match">
@@ -14,24 +14,51 @@
 
   <div class="app-shell">
     <header class="mc-header">
-      <div class="brand">
-        <svg class="brand-icon" viewBox="0 0 32 32" width="28" height="28" aria-hidden="true">
-          <path d="M16 3 L19.2 10.2 L27 11 L21 16.3 L22.7 24 L16 19.9 L9.3 24 L11 16.3 L5 11 L12.8 10.2 Z" fill="#e6b44c" />
-        </svg>
-        <h1 class="brand-title">Christmas Memory Match</h1>
+      <div class="header-top-row">
+        <div class="brand">
+          <svg class="brand-icon" viewBox="0 0 32 32" width="28" height="28" aria-hidden="true">
+            <path d="M16 3 L19.2 10.2 L27 11 L21 16.3 L22.7 24 L16 19.9 L9.3 24 L11 16.3 L5 11 L12.8 10.2 Z" fill="#e6b44c" />
+          </svg>
+          <h1 class="brand-title">Christmas Memory Match</h1>
+        </div>
+
+        <button
+          type="button"
+          id="mobileMenuBtn"
+          class="control-btn mobile-menu-btn"
+          aria-expanded="false"
+          aria-controls="mobileNavDrawer"
+          aria-label="Open navigation and game settings menu"
+        >
+          <svg class="menu-icon-open" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+            <path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+          </svg>
+          <svg class="menu-icon-close" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+            <path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+          </svg>
+          <span class="mobile-menu-label">Menu</span>
+        </button>
       </div>
 
       <div class="hud-stats" aria-live="polite">
-        <span class="stat-item">Moves: <strong id="movesCount" class="tabular">0</strong></span>
+        <span class="stat-item"><span class="stat-label">Moves:</span> <strong id="movesCount" class="tabular">0</strong></span>
         <span class="stat-sep" aria-hidden="true">·</span>
-        <span class="stat-item">Matched: <strong id="matchedCount" class="tabular">0</strong> / <strong id="totalPairsLabel" class="tabular">6</strong></span>
+        <span class="stat-item"><span class="stat-label">Matched:</span> <strong id="matchedCount" class="tabular">0</strong> / <strong id="totalPairsLabel" class="tabular">6</strong></span>
         <span class="stat-sep" aria-hidden="true">·</span>
-        <span class="stat-item">Remaining: <strong id="remainingCount" class="tabular">6</strong></span>
+        <span class="stat-item"><span class="stat-label">Remaining:</span> <strong id="remainingCount" class="tabular">6</strong></span>
         <span class="stat-sep" aria-hidden="true">·</span>
-        <span class="stat-item">Time: <strong id="timerCount" class="tabular">0:00</strong></span>
+        <span class="stat-item"><span class="stat-label">Time:</span> <strong id="timerCount" class="tabular">0:00</strong></span>
       </div>
 
-      <div class="mc-controls">
+      <nav class="mc-controls" aria-label="Game navigation and controls">
+        <button type="button" id="desktopGameBtn" class="control-btn nav-section-btn is-active" aria-current="page" title="Return to the matching game board">
+          Game
+        </button>
+
+        <button type="button" id="leaderboardBtn" class="control-btn nav-section-btn" title="View player rankings and scores (Shortcut: L)">
+          Leaderboard
+        </button>
+
         <label class="pair-select-wrap" for="pairCountSelect">
           <span class="sr-only">Number of picture pairs</span>
           <select id="pairCountSelect" class="control-select" aria-label="Number of picture pairs"></select>
@@ -41,20 +68,96 @@
           Sound: On
         </button>
 
-        <button type="button" id="leaderboardBtn" class="control-btn" title="View player rankings and scores (Shortcut: L)">
-          Leaderboard
-        </button>
-
         <button type="button" id="restartBtn" class="control-btn control-btn-primary" title="Shuffle and start a new game (Shortcut: R)">
           Restart Game
         </button>
-      </div>
+      </nav>
     </header>
 
     <main class="board-stage">
       <div id="gameBoard" class="card-grid" role="grid" aria-label="Memory matching card grid"></div>
     </main>
   </div>
+
+  <!-- Mobile Navigation & Settings Drawer -->
+  <div id="mobileNavBackdrop" class="mobile-nav-backdrop" hidden></div>
+  <aside id="mobileNavDrawer" class="mobile-nav-drawer" aria-label="Mobile menu" hidden>
+    <div class="mobile-nav-header">
+      <span class="mobile-nav-title">Game Menu</span>
+      <button type="button" id="closeMobileMenuBtn" class="close-btn" aria-label="Close menu">&times;</button>
+    </div>
+
+    <nav class="mobile-nav-links" aria-label="Sections">
+      <button type="button" id="mobileGameBtn" class="mobile-nav-item nav-section-btn is-active" aria-current="page">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <rect x="3" y="3" width="8" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="2" />
+          <rect x="13" y="3" width="8" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="2" />
+          <rect x="3" y="13" width="8" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="2" />
+          <rect x="13" y="13" width="8" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="2" />
+        </svg>
+        <span>Game Board</span>
+      </button>
+
+      <button type="button" id="mobileLeaderboardBtn" class="mobile-nav-item nav-section-btn">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path d="M7 4h10v5a5 5 0 0 1-10 0V4Zm-3 1h3v3a3 3 0 0 1-3-3Zm13 0h3a3 3 0 0 1-3 3V5Zm-5 9v3m-3 3h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <span>Leaderboard</span>
+      </button>
+    </nav>
+
+    <div class="mobile-nav-settings">
+      <div class="mobile-setting-row">
+        <label for="mobilePairCountSelect" class="mobile-setting-label">Difficulty / Pairs</label>
+        <select id="mobilePairCountSelect" class="control-select mobile-setting-select" aria-label="Number of picture pairs"></select>
+      </div>
+
+      <button type="button" id="mobileSoundToggleBtn" class="mobile-nav-item" aria-pressed="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path d="M11 5L6 9H2v6h4l5 4V5Zm4.5 3.5a5 5 0 0 1 0 7m2.8-9.8a9 9 0 0 1 0 12.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <span id="mobileSoundLabel">Sound: On</span>
+      </button>
+
+      <button type="button" id="mobileRestartBtn" class="control-btn control-btn-primary mobile-restart-btn">
+        Restart Game
+      </button>
+    </div>
+  </aside>
+
+  <!-- Mobile Bottom Navigation Bar -->
+  <nav id="mobileBottomNav" class="mobile-bottom-nav" aria-label="Mobile quick navigation">
+    <button type="button" id="bottomGameBtn" class="bottom-nav-btn nav-section-btn is-active" aria-current="page">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <rect x="3" y="3" width="8" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="2" />
+        <rect x="13" y="3" width="8" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="2" />
+        <rect x="3" y="13" width="8" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="2" />
+        <rect x="13" y="13" width="8" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="2" />
+      </svg>
+      <span>Game</span>
+    </button>
+
+    <button type="button" id="bottomLeaderboardBtn" class="bottom-nav-btn nav-section-btn">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <path d="M7 4h10v5a5 5 0 0 1-10 0V4Zm-3 1h3v3a3 3 0 0 1-3-3Zm13 0h3a3 3 0 0 1-3 3V5Zm-5 9v3m-3 3h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      <span>Leaderboard</span>
+    </button>
+
+    <button type="button" id="bottomRestartBtn" class="bottom-nav-btn">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <path d="M3 12a9 9 0 1 0 3-6.7L3 8m0-5v5h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      <span>Restart</span>
+    </button>
+
+    <button type="button" id="bottomMenuBtn" class="bottom-nav-btn" aria-expanded="false" aria-controls="mobileNavDrawer">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+      </svg>
+      <span>Menu</span>
+    </button>
+  </nav>
 
   <!-- Completion Modal -->
   <div id="winModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="winTitle" hidden>

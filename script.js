@@ -66,9 +66,24 @@ const GAME_CONFIG = {
     remainingCount: document.getElementById('remainingCount'),
     timerCount: document.getElementById('timerCount'),
     pairSelect: document.getElementById('pairCountSelect'),
+    mobilePairSelect: document.getElementById('mobilePairCountSelect'),
+    desktopGameBtn: document.getElementById('desktopGameBtn'),
     restartBtn: document.getElementById('restartBtn'),
     soundToggleBtn: document.getElementById('soundToggleBtn'),
     leaderboardBtn: document.getElementById('leaderboardBtn'),
+    mobileMenuBtn: document.getElementById('mobileMenuBtn'),
+    mobileNavBackdrop: document.getElementById('mobileNavBackdrop'),
+    mobileNavDrawer: document.getElementById('mobileNavDrawer'),
+    closeMobileMenuBtn: document.getElementById('closeMobileMenuBtn'),
+    mobileGameBtn: document.getElementById('mobileGameBtn'),
+    mobileLeaderboardBtn: document.getElementById('mobileLeaderboardBtn'),
+    mobileSoundToggleBtn: document.getElementById('mobileSoundToggleBtn'),
+    mobileSoundLabel: document.getElementById('mobileSoundLabel'),
+    mobileRestartBtn: document.getElementById('mobileRestartBtn'),
+    bottomGameBtn: document.getElementById('bottomGameBtn'),
+    bottomLeaderboardBtn: document.getElementById('bottomLeaderboardBtn'),
+    bottomRestartBtn: document.getElementById('bottomRestartBtn'),
+    bottomMenuBtn: document.getElementById('bottomMenuBtn'),
     winModal: document.getElementById('winModal'),
     winSummary: document.getElementById('winSummary'),
     winScoreValue: document.getElementById('winScoreValue'),
@@ -97,6 +112,7 @@ const GAME_CONFIG = {
 
   const state = {
     pairCount: 6,
+    currentTotalCards: 12,
     moves: 0,
     matchedPairs: 0,
     flippedCards: [],
@@ -111,6 +127,7 @@ const GAME_CONFIG = {
     pendingSyncQueue: [],
     lastCompletedEntryId: null,
     syncStatus: 'offline',
+    activeSection: 'game',
     activeFetchPromise: null,
     syncPollTimer: null,
     syncPollCount: 0
@@ -234,6 +251,32 @@ const GAME_CONFIG = {
   }
 
   function computeGridDimensions(totalCards) {
+    const isPortraitMobile =
+      window.innerWidth <= 768 && window.innerHeight >= window.innerWidth;
+
+    if (isPortraitMobile) {
+      const portraitPresets = {
+        4: { cols: 2, rows: 2 },
+        6: { cols: 2, rows: 3 },
+        8: { cols: 2, rows: 4 },
+        10: { cols: 2, rows: 5 },
+        12: { cols: 3, rows: 4 },
+        14: { cols: 4, rows: 4 },
+        16: { cols: 4, rows: 4 },
+        18: { cols: 3, rows: 6 },
+        20: { cols: 4, rows: 5 },
+        24: { cols: 4, rows: 6 },
+        30: { cols: 5, rows: 6 },
+        36: { cols: 6, rows: 6 },
+        40: { cols: 5, rows: 8 }
+      };
+      if (portraitPresets[totalCards]) return portraitPresets[totalCards];
+
+      const cols = totalCards <= 10 ? 2 : totalCards <= 18 ? 3 : 4;
+      const rows = Math.ceil(totalCards / cols);
+      return { cols: cols, rows: rows };
+    }
+
     const presets = {
       4: { cols: 2, rows: 2 },
       6: { cols: 3, rows: 2 },
@@ -246,7 +289,8 @@ const GAME_CONFIG = {
       20: { cols: 5, rows: 4 },
       24: { cols: 6, rows: 4 },
       30: { cols: 6, rows: 5 },
-      36: { cols: 6, rows: 6 }
+      36: { cols: 6, rows: 6 },
+      40: { cols: 8, rows: 5 }
     };
 
     if (presets[totalCards]) return presets[totalCards];
@@ -254,6 +298,29 @@ const GAME_CONFIG = {
     const cols = Math.ceil(Math.sqrt(totalCards * 1.25));
     const rows = Math.ceil(totalCards / cols);
     return { cols: cols, rows: rows };
+  }
+
+  function applyGridLayout(totalCards) {
+    const count = totalCards || state.currentTotalCards || state.pairCount * 2;
+    const dims = computeGridDimensions(count);
+    els.board.style.setProperty('--grid-cols', String(dims.cols));
+    els.board.style.setProperty('--grid-rows', String(dims.rows));
+  }
+
+  function populatePairSelectElement(selectEl, options) {
+    if (!selectEl) return;
+    selectEl.innerHTML = '';
+    options.forEach(function (count) {
+      const opt = document.createElement('option');
+      opt.value = String(count);
+      opt.textContent = count + ' Pairs (' + count * 2 + ' Cards)';
+      selectEl.appendChild(opt);
+    });
+  }
+
+  function syncPairSelectValues() {
+    if (els.pairSelect) els.pairSelect.value = String(state.pairCount);
+    if (els.mobilePairSelect) els.mobilePairSelect.value = String(state.pairCount);
   }
 
   function populatePairOptions() {
@@ -274,13 +341,8 @@ const GAME_CONFIG = {
       options.push(available);
     }
 
-    els.pairSelect.innerHTML = '';
-    options.forEach(function (count) {
-      const opt = document.createElement('option');
-      opt.value = String(count);
-      opt.textContent = count + ' Pairs (' + count * 2 + ' Cards)';
-      els.pairSelect.appendChild(opt);
-    });
+    populatePairSelectElement(els.pairSelect, options);
+    populatePairSelectElement(els.mobilePairSelect, options);
 
     const preferred = Math.min(GAME_CONFIG.defaultPairs || 6, available);
     if (options.indexOf(preferred) !== -1) {
@@ -291,7 +353,7 @@ const GAME_CONFIG = {
       state.pairCount = 0;
     }
 
-    els.pairSelect.value = String(state.pairCount);
+    syncPairSelectValues();
   }
 
   function updateHud() {
@@ -1056,11 +1118,10 @@ const GAME_CONFIG = {
     state.matchedPairs = 0;
     state.flippedCards = [];
     state.isBoardLocked = false;
+    state.currentTotalCards = shuffledDeck.length;
     updateHud();
 
-    const dims = computeGridDimensions(shuffledDeck.length);
-    els.board.style.setProperty('--grid-cols', String(dims.cols));
-    els.board.style.setProperty('--grid-rows', String(dims.rows));
+    applyGridLayout(shuffledDeck.length);
     els.board.innerHTML = '';
 
     shuffledDeck.forEach(function (cardData, index) {
@@ -1183,10 +1244,67 @@ const GAME_CONFIG = {
     els.winModal.hidden = true;
   }
 
+  function setActiveSection(section) {
+    state.activeSection = section === 'leaderboard' ? 'leaderboard' : 'game';
+    const isLeaderboard = state.activeSection === 'leaderboard';
+
+    const gameButtons = [els.desktopGameBtn, els.mobileGameBtn, els.bottomGameBtn];
+    const leaderboardButtons = [els.leaderboardBtn, els.mobileLeaderboardBtn, els.bottomLeaderboardBtn];
+
+    gameButtons.forEach(function (btn) {
+      if (!btn) return;
+      btn.classList.toggle('is-active', !isLeaderboard);
+      if (!isLeaderboard) {
+        btn.setAttribute('aria-current', 'page');
+      } else {
+        btn.removeAttribute('aria-current');
+      }
+    });
+
+    leaderboardButtons.forEach(function (btn) {
+      if (!btn) return;
+      btn.classList.toggle('is-active', isLeaderboard);
+      if (isLeaderboard) {
+        btn.setAttribute('aria-current', 'page');
+      } else {
+        btn.removeAttribute('aria-current');
+      }
+    });
+  }
+
+  function openMobileMenu() {
+    if (!els.mobileNavDrawer || !els.mobileNavBackdrop) return;
+    els.mobileNavBackdrop.hidden = false;
+    els.mobileNavDrawer.hidden = false;
+    if (els.mobileMenuBtn) els.mobileMenuBtn.setAttribute('aria-expanded', 'true');
+    if (els.bottomMenuBtn) els.bottomMenuBtn.setAttribute('aria-expanded', 'true');
+    if (els.closeMobileMenuBtn) els.closeMobileMenuBtn.focus();
+  }
+
+  function closeMobileMenu() {
+    if (!els.mobileNavDrawer || !els.mobileNavBackdrop) return;
+    if (els.mobileNavDrawer.hidden) return;
+    els.mobileNavBackdrop.hidden = true;
+    els.mobileNavDrawer.hidden = true;
+    if (els.mobileMenuBtn) els.mobileMenuBtn.setAttribute('aria-expanded', 'false');
+    if (els.bottomMenuBtn) els.bottomMenuBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  function toggleMobileMenu() {
+    if (!els.mobileNavDrawer) return;
+    if (els.mobileNavDrawer.hidden) {
+      openMobileMenu();
+    } else {
+      closeMobileMenu();
+    }
+  }
+
   function openLeaderboardModal() {
+    closeMobileMenu();
     syncCurrentPlayerName();
     renderLeaderboard();
     updateSyncStatusUI();
+    setActiveSection('leaderboard');
     els.leaderboardModal.hidden = false;
     els.closeLeaderboardBtn.focus();
     refreshLeaderboardFromGitHub();
@@ -1194,6 +1312,7 @@ const GAME_CONFIG = {
 
   function closeLeaderboardModal() {
     els.leaderboardModal.hidden = true;
+    setActiveSection('game');
   }
 
   /* --------------------------------------------------------------------------
@@ -1224,17 +1343,40 @@ const GAME_CONFIG = {
    * ------------------------------------------------------------------------ */
   function toggleSound() {
     state.soundEnabled = !state.soundEnabled;
-    els.soundToggleBtn.textContent = state.soundEnabled ? 'Sound: On' : 'Sound: Off';
-    els.soundToggleBtn.setAttribute('aria-pressed', String(state.soundEnabled));
+    const labelText = state.soundEnabled ? 'Sound: On' : 'Sound: Off';
+    if (els.soundToggleBtn) {
+      els.soundToggleBtn.textContent = labelText;
+      els.soundToggleBtn.setAttribute('aria-pressed', String(state.soundEnabled));
+    }
+    if (els.mobileSoundLabel) {
+      els.mobileSoundLabel.textContent = labelText;
+    }
+    if (els.mobileSoundToggleBtn) {
+      els.mobileSoundToggleBtn.setAttribute('aria-pressed', String(state.soundEnabled));
+    }
   }
 
-  els.pairSelect.addEventListener('change', function () {
-    const val = parseInt(els.pairSelect.value, 10);
+  function handlePairCountChange(newVal) {
+    const val = parseInt(newVal, 10);
     if (!isNaN(val) && val > 0) {
       state.pairCount = val;
+      syncPairSelectValues();
       startNewGame();
     }
-  });
+  }
+
+  if (els.pairSelect) {
+    els.pairSelect.addEventListener('change', function () {
+      handlePairCountChange(els.pairSelect.value);
+    });
+  }
+
+  if (els.mobilePairSelect) {
+    els.mobilePairSelect.addEventListener('change', function () {
+      handlePairCountChange(els.mobilePairSelect.value);
+      closeMobileMenu();
+    });
+  }
 
   els.playerNameInput.addEventListener('input', function () {
     syncCurrentPlayerName();
@@ -1277,16 +1419,57 @@ const GAME_CONFIG = {
     });
   }
 
+  function navigateToGame() {
+    closeMobileMenu();
+    closeLeaderboardModal();
+    hideWinModal();
+    setActiveSection('game');
+  }
+
+  if (els.desktopGameBtn) els.desktopGameBtn.addEventListener('click', navigateToGame);
+  if (els.mobileGameBtn) els.mobileGameBtn.addEventListener('click', navigateToGame);
+  if (els.bottomGameBtn) els.bottomGameBtn.addEventListener('click', navigateToGame);
+
+  if (els.mobileMenuBtn) els.mobileMenuBtn.addEventListener('click', toggleMobileMenu);
+  if (els.bottomMenuBtn) els.bottomMenuBtn.addEventListener('click', toggleMobileMenu);
+  if (els.closeMobileMenuBtn) els.closeMobileMenuBtn.addEventListener('click', closeMobileMenu);
+  if (els.mobileNavBackdrop) els.mobileNavBackdrop.addEventListener('click', closeMobileMenu);
+
   els.restartBtn.addEventListener('click', startNewGame);
+  if (els.mobileRestartBtn) {
+    els.mobileRestartBtn.addEventListener('click', function () {
+      closeMobileMenu();
+      closeLeaderboardModal();
+      startNewGame();
+    });
+  }
+  if (els.bottomRestartBtn) {
+    els.bottomRestartBtn.addEventListener('click', function () {
+      closeMobileMenu();
+      closeLeaderboardModal();
+      startNewGame();
+    });
+  }
+
   els.playAgainBtn.addEventListener('click', startNewGame);
   els.closeWinBtn.addEventListener('click', hideWinModal);
   els.viewLeaderboardBtn.addEventListener('click', function () {
     hideWinModal();
     openLeaderboardModal();
   });
+
   els.soundToggleBtn.addEventListener('click', toggleSound);
+  if (els.mobileSoundToggleBtn) {
+    els.mobileSoundToggleBtn.addEventListener('click', function () {
+      toggleSound();
+      closeMobileMenu();
+    });
+  }
 
   els.leaderboardBtn.addEventListener('click', openLeaderboardModal);
+  if (els.mobileLeaderboardBtn) els.mobileLeaderboardBtn.addEventListener('click', openLeaderboardModal);
+  if (els.bottomLeaderboardBtn) els.bottomLeaderboardBtn.addEventListener('click', openLeaderboardModal);
+
   els.closeLeaderboardBtn.addEventListener('click', closeLeaderboardModal);
   els.leaderboardDoneBtn.addEventListener('click', closeLeaderboardModal);
 
@@ -1307,6 +1490,7 @@ const GAME_CONFIG = {
       (e.target && e.target.isContentEditable);
 
     if (e.key === 'Escape') {
+      closeMobileMenu();
       hideWinModal();
       closeLeaderboardModal();
       return;
@@ -1325,6 +1509,16 @@ const GAME_CONFIG = {
         closeLeaderboardModal();
       }
     }
+  });
+
+  window.addEventListener('resize', function () {
+    applyGridLayout();
+  });
+
+  window.addEventListener('orientationchange', function () {
+    setTimeout(function () {
+      applyGridLayout();
+    }, 60);
   });
 
   window.addEventListener('online', function () {
@@ -1351,6 +1545,7 @@ const GAME_CONFIG = {
   loadSyncQueue();
   renderLeaderboard();
   updateSyncStatusUI();
+  setActiveSection('game');
   populatePairOptions();
   createSnowflakes();
   startNewGame();
