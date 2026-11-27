@@ -49,8 +49,14 @@ const GAME_CONFIG = {
 
   const LEADERBOARD_STORAGE_KEY = 'dmbb_dbb_matching_leaderboard_v1';
   const SYNC_QUEUE_STORAGE_KEY = 'dmbb_dbb_matching_sync_queue_v1';
-  const LEADERBOARD_API_URL = '/api/leaderboard';
-  const SYNC_RETRY_INTERVAL_MS = 15000;
+  const GITHUB_SYNC_CONFIG = {
+    owner: 'mcfaith9',
+    repo: 'dmbbdbb',
+    branch: 'main',
+    filePath: 'data/leaderboard.json'
+  };
+  const SYNC_POLL_INTERVAL_MS = 5000;
+  const MAX_SYNC_POLL_ATTEMPTS = 18;
 
   const els = {
     board: document.getElementById('gameBoard'),
@@ -72,12 +78,15 @@ const GAME_CONFIG = {
     winNameForm: document.getElementById('winNameForm'),
     playerNameInput: document.getElementById('playerNameInput'),
     saveNameStatus: document.getElementById('saveNameStatus'),
+    winGitHubSyncLink: document.getElementById('winGitHubSyncLink'),
     playAgainBtn: document.getElementById('playAgainBtn'),
     viewLeaderboardBtn: document.getElementById('viewLeaderboardBtn'),
     closeWinBtn: document.getElementById('closeWinBtn'),
     leaderboardModal: document.getElementById('leaderboardModal'),
     closeLeaderboardBtn: document.getElementById('closeLeaderboardBtn'),
     leaderboardDoneBtn: document.getElementById('leaderboardDoneBtn'),
+    refreshLeaderboardBtn: document.getElementById('refreshLeaderboardBtn'),
+    leaderboardGitHubSyncLink: document.getElementById('leaderboardGitHubSyncLink'),
     leaderboardEmpty: document.getElementById('leaderboardEmpty'),
     leaderboardListWrap: document.getElementById('leaderboardListWrap'),
     leaderboardList: document.getElementById('leaderboardList'),
@@ -102,8 +111,9 @@ const GAME_CONFIG = {
     pendingSyncQueue: [],
     lastCompletedEntryId: null,
     syncStatus: 'offline',
-    activeSyncPromise: null,
-    syncRetryTimer: null
+    activeFetchPromise: null,
+    syncPollTimer: null,
+    syncPollCount: 0
   };
 
   /* --------------------------------------------------------------------------
@@ -479,26 +489,34 @@ const GAME_CONFIG = {
   }
 
   function updateSyncStatusUI() {
-    if (!els.syncStatusBadge || !els.syncStatusText) return;
+    if (els.syncStatusBadge && els.syncStatusText) {
+      els.syncStatusBadge.classList.remove(
+        'sync-status-synced',
+        'sync-status-syncing',
+        'sync-status-offline'
+      );
 
-    els.syncStatusBadge.classList.remove(
-      'sync-status-synced',
-      'sync-status-syncing',
-      'sync-status-offline'
-    );
-
-    if (state.syncStatus === 'syncing') {
-      els.syncStatusBadge.classList.add('sync-status-syncing');
-      els.syncStatusText.textContent = 'Syncing';
-    } else if (state.syncStatus === 'synced') {
-      els.syncStatusBadge.classList.add('sync-status-synced');
-      els.syncStatusText.textContent = 'Synced';
-    } else {
-      els.syncStatusBadge.classList.add('sync-status-offline');
-      const queuedCount = state.pendingSyncQueue.length;
-      els.syncStatusText.textContent =
-        queuedCount > 0 ? 'Offline (' + queuedCount + ' queued)' : 'Offline';
+      if (state.syncStatus === 'syncing') {
+        els.syncStatusBadge.classList.add('sync-status-syncing');
+        els.syncStatusText.textContent = 'Syncing';
+      } else if (state.syncStatus === 'synced' && state.pendingSyncQueue.length === 0) {
+        els.syncStatusBadge.classList.add('sync-status-synced');
+        els.syncStatusText.textContent = 'Synced';
+      } else {
+        els.syncStatusBadge.classList.add('sync-status-offline');
+        const queuedCount = state.pendingSyncQueue.length;
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+          els.syncStatusText.textContent =
+            queuedCount > 0 ? 'Offline (' + queuedCount + ' queued)' : 'Offline';
+        } else if (queuedCount > 0) {
+          els.syncStatusText.textContent = 'Pending Sync (' + queuedCount + ')';
+        } else {
+          els.syncStatusText.textContent = 'Offline';
+        }
+      }
     }
+
+    updateGitHubSyncLinks();
   }
 
   function setSyncStatus(status) {
@@ -506,21 +524,122 @@ const GAME_CONFIG = {
     updateSyncStatusUI();
   }
 
-  function scheduleSyncRetry() {
-    if (state.syncRetryTimer || state.pendingSyncQueue.length === 0) return;
-    state.syncRetryTimer = setTimeout(function () {
-      state.syncRetryTimer = null;
-      if (state.pendingSyncQueue.length > 0) {
-        refreshLeaderboardFromServer();
-      }
-    }, SYNC_RETRY_INTERVAL_MS);
+  function buildGitHubIssueUrl(entriesToSubmit) {
+    const batch = (entriesToSubmit || []).slice(0, 10);
+    const title =
+      batch.length === 1
+        ? '[Leaderboard] ' + batch[0].playerName + ' - ' + batch[0].score + ' pts'
+        : '[Leaderboard] Sync ' + batch.length + ' game scores';
+
+    const summaryLines = batch.map(function (entry) {
+      return (
+        '- **' +
+        entry.playerName +
+        '**: ' +
+        entry.score +
+        ' pts | ' +
+        entry.attempts +
+        ' attempts | ' +
+        formatCompletionTime(entry.completionTimeMs) +
+        ' | ' +
+        entry.matches +
+        '/' +
+        entry.totalPairs +
+        ' pairs'
+      );
+    });
+
+    const body = [
+      '### DMBB DBB Matching Game — Leaderboard Submission',
+      '',
+      'Click **Submit new issue** below to record your score on the shared leaderboard.',
+      '',
+      summaryLines.join('\n'),
+      '',
+      '```json',
+      JSON.stringify({ entries: batch }, null, 2),
+      '```'
+    ].join('\n');
+
+    return (
+      'https://github.com/' +
+      GITHUB_SYNC_CONFIG.owner +
+      '/' +
+      GITHUB_SYNC_CONFIG.repo +
+      '/issues/new?title=' +
+      encodeURIComponent(title) +
+      '&body=' +
+      encodeURIComponent(body)
+    );
   }
 
-  function clearSyncRetry() {
-    if (state.syncRetryTimer) {
-      clearTimeout(state.syncRetryTimer);
-      state.syncRetryTimer = null;
+  function updateGitHubSyncLinks() {
+    const queued = state.pendingSyncQueue.slice();
+
+    if (els.leaderboardGitHubSyncLink) {
+      if (queued.length > 0) {
+        els.leaderboardGitHubSyncLink.href = buildGitHubIssueUrl(queued);
+        els.leaderboardGitHubSyncLink.textContent =
+          queued.length === 1
+            ? 'Sync 1 Score to GitHub'
+            : 'Sync ' + Math.min(queued.length, 10) + ' Scores to GitHub';
+        els.leaderboardGitHubSyncLink.hidden = false;
+      } else {
+        els.leaderboardGitHubSyncLink.hidden = true;
+      }
     }
+
+    if (els.winGitHubSyncLink) {
+      const targetEntries =
+        queued.length > 0
+          ? queued
+          : state.leaderboardEntries.filter(function (item) {
+              return item.id === state.lastCompletedEntryId;
+            });
+
+      if (targetEntries.length > 0) {
+        els.winGitHubSyncLink.href = buildGitHubIssueUrl(targetEntries);
+        els.winGitHubSyncLink.textContent =
+          targetEntries.length > 1
+            ? 'Submit ' + Math.min(targetEntries.length, 10) + ' Scores to GitHub'
+            : 'Submit Score to GitHub';
+        els.winGitHubSyncLink.hidden = false;
+      } else {
+        els.winGitHubSyncLink.hidden = true;
+      }
+    }
+  }
+
+  function stopSyncWatcher() {
+    if (state.syncPollTimer) {
+      clearTimeout(state.syncPollTimer);
+      state.syncPollTimer = null;
+    }
+    state.syncPollCount = 0;
+  }
+
+  function startSyncWatcher() {
+    stopSyncWatcher();
+    if (state.pendingSyncQueue.length === 0) return;
+    setSyncStatus('syncing');
+
+    function pollStep() {
+      if (state.pendingSyncQueue.length === 0 || state.syncPollCount >= MAX_SYNC_POLL_ATTEMPTS) {
+        stopSyncWatcher();
+        updateSyncStatusUI();
+        return;
+      }
+      state.syncPollCount += 1;
+      refreshLeaderboardFromGitHub().then(function () {
+        if (state.pendingSyncQueue.length > 0 && state.syncPollCount < MAX_SYNC_POLL_ATTEMPTS) {
+          state.syncPollTimer = setTimeout(pollStep, SYNC_POLL_INTERVAL_MS);
+        } else {
+          stopSyncWatcher();
+        }
+      });
+    }
+
+    state.syncPollTimer = setTimeout(pollStep, SYNC_POLL_INTERVAL_MS);
   }
 
   function enqueueEntryForSync(entry) {
@@ -535,154 +654,143 @@ const GAME_CONFIG = {
     updateSyncStatusUI();
   }
 
-  function applyServerEntries(remoteEntries) {
+  function decodeBase64Utf8(base64Text) {
+    const cleaned = String(base64Text || '').replace(/\s+/g, '');
+    const binary = window.atob(cleaned);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    if (typeof TextDecoder !== 'undefined') {
+      return new TextDecoder('utf-8').decode(bytes);
+    }
+    return decodeURIComponent(escape(binary));
+  }
+
+  function parseRemotePayload(parsed) {
+    const rawList = Array.isArray(parsed)
+      ? parsed
+      : (parsed && Array.isArray(parsed.entries) ? parsed.entries : []);
+    return mergeEntryLists([], rawList);
+  }
+
+  function fetchFromGitHubApi() {
+    const encodedPath = GITHUB_SYNC_CONFIG.filePath
+      .split('/')
+      .map(encodeURIComponent)
+      .join('/');
+    const apiUrl =
+      'https://api.github.com/repos/' +
+      GITHUB_SYNC_CONFIG.owner +
+      '/' +
+      GITHUB_SYNC_CONFIG.repo +
+      '/contents/' +
+      encodedPath +
+      '?ref=' +
+      encodeURIComponent(GITHUB_SYNC_CONFIG.branch);
+
+    return fetch(apiUrl, {
+      method: 'GET',
+      cache: 'no-store',
+      headers: {
+        Accept: 'application/vnd.github+json'
+      }
+    }).then(function (response) {
+      if (response.status === 404) {
+        return [];
+      }
+      if (!response.ok) {
+        throw new Error('GitHub API read failed (' + response.status + ')');
+      }
+      return response.json().then(function (data) {
+        if (typeof data.content === 'string') {
+          const decoded = decodeBase64Utf8(data.content);
+          return decoded.trim() ? parseRemotePayload(JSON.parse(decoded)) : [];
+        }
+        if (data.download_url) {
+          return fetch(data.download_url + '?t=' + Date.now(), { cache: 'no-store' })
+            .then(function (rawResp) {
+              if (!rawResp.ok) throw new Error('Raw download failed');
+              return rawResp.json();
+            })
+            .then(parseRemotePayload);
+        }
+        return [];
+      });
+    });
+  }
+
+  function fetchFromStaticFallback() {
+    return fetch('./' + GITHUB_SYNC_CONFIG.filePath + '?t=' + Date.now(), {
+      method: 'GET',
+      cache: 'no-store'
+    }).then(function (response) {
+      if (!response.ok) {
+        throw new Error('Static leaderboard fetch failed (' + response.status + ')');
+      }
+      return response.json().then(parseRemotePayload);
+    });
+  }
+
+  function reconcileRemoteEntries(remoteEntries) {
+    const remoteById = new Map();
+    remoteEntries.forEach(function (item) {
+      remoteById.set(item.id, item);
+    });
+
+    state.pendingSyncQueue = state.pendingSyncQueue.filter(function (queued) {
+      const remote = remoteById.get(queued.id);
+      if (!remote) return true;
+      if (remote.playerName !== queued.playerName && queued.updatedAt > remote.updatedAt) {
+        return true;
+      }
+      return false;
+    });
+    saveSyncQueue();
+
     state.leaderboardEntries = mergeEntryLists(remoteEntries, state.pendingSyncQueue);
     saveLeaderboard();
     renderLeaderboard();
   }
 
-  function flushSyncQueue() {
-    if (state.pendingSyncQueue.length === 0) {
-      return Promise.resolve(true);
-    }
-
+  function refreshLeaderboardFromGitHub() {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       setSyncStatus('offline');
-      scheduleSyncRetry();
       return Promise.resolve(false);
     }
 
-    if (state.activeSyncPromise) {
-      return state.activeSyncPromise.then(function () {
-        if (state.pendingSyncQueue.length > 0) {
-          return flushSyncQueue();
-        }
-        return true;
-      });
+    if (state.activeFetchPromise) {
+      return state.activeFetchPromise;
     }
-
-    const batch = state.pendingSyncQueue.slice();
-    const sentVersions = new Map();
-    batch.forEach(function (item) {
-      sentVersions.set(item.id, item.updatedAt);
-    });
 
     setSyncStatus('syncing');
 
-    state.activeSyncPromise = fetch(LEADERBOARD_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ entries: batch })
-    })
-      .then(function (response) {
-        return response
-          .json()
-          .catch(function () {
-            return {};
-          })
-          .then(function (data) {
-            if (!response.ok || !data || !data.ok) {
-              throw new Error((data && data.error) || 'Sync failed');
-            }
-            return data;
-          });
+    state.activeFetchPromise = fetchFromGitHubApi()
+      .catch(function () {
+        return fetchFromStaticFallback();
       })
-      .then(function (data) {
-        const syncedIdSet = new Set(Array.isArray(data.syncedIds) ? data.syncedIds : []);
-        state.pendingSyncQueue = state.pendingSyncQueue.filter(function (item) {
-          if (!syncedIdSet.has(item.id)) return true;
-          // Keep in queue if the user edited the name while this upload was in flight
-          return item.updatedAt > (sentVersions.get(item.id) || 0);
-        });
-        saveSyncQueue();
-
-        if (Array.isArray(data.entries)) {
-          applyServerEntries(data.entries);
-        }
-
+      .then(function (remoteEntries) {
+        reconcileRemoteEntries(remoteEntries);
         if (state.pendingSyncQueue.length === 0) {
-          clearSyncRetry();
+          stopSyncWatcher();
           setSyncStatus('synced');
           if (els.winModal && !els.winModal.hidden && els.saveNameStatus) {
-            els.saveNameStatus.textContent = 'Synced to shared GitHub Leaderboard.';
+            els.saveNameStatus.textContent = 'Synced to shared GitHub Leaderboard!';
           }
-          return true;
+        } else {
+          setSyncStatus(state.syncPollTimer ? 'syncing' : 'offline');
         }
-
-        // Flush any newer edits made mid-flight
-        state.activeSyncPromise = null;
-        return flushSyncQueue();
+        return true;
       })
       .catch(function () {
         setSyncStatus('offline');
-        scheduleSyncRetry();
-        if (els.winModal && !els.winModal.hidden && els.saveNameStatus) {
-          els.saveNameStatus.textContent = 'Saved locally. Will sync when connection is available.';
-        }
         return false;
       })
       .finally(function () {
-        state.activeSyncPromise = null;
+        state.activeFetchPromise = null;
       });
 
-    return state.activeSyncPromise;
-  }
-
-  function refreshLeaderboardFromServer() {
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-      setSyncStatus('offline');
-      if (state.pendingSyncQueue.length > 0) scheduleSyncRetry();
-      return Promise.resolve(false);
-    }
-
-    const preFlush = state.pendingSyncQueue.length > 0 ? flushSyncQueue() : Promise.resolve(true);
-
-    return preFlush.then(function (flushedOk) {
-      if (state.pendingSyncQueue.length > 0 && !flushedOk) {
-        setSyncStatus('offline');
-        scheduleSyncRetry();
-        return false;
-      }
-
-      setSyncStatus('syncing');
-      return fetch(LEADERBOARD_API_URL, {
-        method: 'GET',
-        cache: 'no-store'
-      })
-        .then(function (response) {
-          return response
-            .json()
-            .catch(function () {
-              return {};
-            })
-            .then(function (data) {
-              if (!response.ok || !data || !data.ok) {
-                throw new Error((data && data.error) || 'Fetch failed');
-              }
-              return data;
-            });
-        })
-        .then(function (data) {
-          if (Array.isArray(data.entries)) {
-            applyServerEntries(data.entries);
-          }
-          if (state.pendingSyncQueue.length > 0) {
-            setSyncStatus('offline');
-            scheduleSyncRetry();
-          } else {
-            clearSyncRetry();
-            setSyncStatus('synced');
-          }
-          return true;
-        })
-        .catch(function () {
-          setSyncStatus('offline');
-          if (state.pendingSyncQueue.length > 0) scheduleSyncRetry();
-          return false;
-        });
-    });
+    return state.activeFetchPromise;
   }
 
   function recordGameResult(result) {
@@ -705,7 +813,6 @@ const GAME_CONFIG = {
     saveLeaderboard();
     renderLeaderboard();
     enqueueEntryForSync(entry);
-    flushSyncQueue();
     return entry;
   }
 
@@ -725,7 +832,6 @@ const GAME_CONFIG = {
       saveLeaderboard();
       renderLeaderboard();
       enqueueEntryForSync(target);
-      flushSyncQueue();
     }
     return true;
   }
@@ -1056,13 +1162,9 @@ const GAME_CONFIG = {
     els.winMatchesValue.textContent = entry.matches + '/' + entry.totalPairs;
 
     els.playerNameInput.value = entry.playerName;
-    if (state.syncStatus === 'synced' && state.pendingSyncQueue.length === 0) {
-      els.saveNameStatus.textContent = 'Synced to shared GitHub Leaderboard.';
-    } else if (state.syncStatus === 'syncing') {
-      els.saveNameStatus.textContent = 'Saved locally · Syncing to shared Leaderboard...';
-    } else {
-      els.saveNameStatus.textContent = 'Saved locally · Will sync when online.';
-    }
+    els.saveNameStatus.textContent =
+      'Saved locally. Click "Submit Score to GitHub" to share across PCs.';
+    updateGitHubSyncLinks();
     els.winModal.hidden = false;
     els.playerNameInput.focus();
     els.playerNameInput.select();
@@ -1087,7 +1189,7 @@ const GAME_CONFIG = {
     updateSyncStatusUI();
     els.leaderboardModal.hidden = false;
     els.closeLeaderboardBtn.focus();
-    refreshLeaderboardFromServer();
+    refreshLeaderboardFromGitHub();
   }
 
   function closeLeaderboardModal() {
@@ -1134,6 +1236,10 @@ const GAME_CONFIG = {
     }
   });
 
+  els.playerNameInput.addEventListener('input', function () {
+    syncCurrentPlayerName();
+  });
+
   els.winNameForm.addEventListener('submit', function (e) {
     e.preventDefault();
     const typed = els.playerNameInput.value.trim();
@@ -1143,9 +1249,33 @@ const GAME_CONFIG = {
       return;
     }
     if (updateEntryPlayerName(state.lastCompletedEntryId, typed)) {
-      els.saveNameStatus.textContent = 'Saved as "' + typed + '" on the Leaderboard!';
+      els.saveNameStatus.textContent =
+        'Name updated to "' + typed + '". Click "Submit Score to GitHub" to sync.';
     }
   });
+
+  if (els.winGitHubSyncLink) {
+    els.winGitHubSyncLink.addEventListener('click', function () {
+      syncCurrentPlayerName();
+      updateGitHubSyncLinks();
+      els.saveNameStatus.textContent =
+        'GitHub submission opened — click "Submit new issue" on GitHub to sync.';
+      startSyncWatcher();
+    });
+  }
+
+  if (els.leaderboardGitHubSyncLink) {
+    els.leaderboardGitHubSyncLink.addEventListener('click', function () {
+      updateGitHubSyncLinks();
+      startSyncWatcher();
+    });
+  }
+
+  if (els.refreshLeaderboardBtn) {
+    els.refreshLeaderboardBtn.addEventListener('click', function () {
+      refreshLeaderboardFromGitHub();
+    });
+  }
 
   els.restartBtn.addEventListener('click', startNewGame);
   els.playAgainBtn.addEventListener('click', startNewGame);
@@ -1198,11 +1328,23 @@ const GAME_CONFIG = {
   });
 
   window.addEventListener('online', function () {
-    refreshLeaderboardFromServer();
+    refreshLeaderboardFromGitHub();
   });
 
   window.addEventListener('offline', function () {
     setSyncStatus('offline');
+  });
+
+  window.addEventListener('focus', function () {
+    if (state.pendingSyncQueue.length > 0 || (els.leaderboardModal && !els.leaderboardModal.hidden)) {
+      refreshLeaderboardFromGitHub();
+    }
+  });
+
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && (state.pendingSyncQueue.length > 0 || (els.leaderboardModal && !els.leaderboardModal.hidden))) {
+      refreshLeaderboardFromGitHub();
+    }
   });
 
   loadLeaderboard();
@@ -1212,5 +1354,5 @@ const GAME_CONFIG = {
   populatePairOptions();
   createSnowflakes();
   startNewGame();
-  refreshLeaderboardFromServer();
+  refreshLeaderboardFromGitHub();
 })();

@@ -108,7 +108,16 @@
       </form>
 
       <div class="modal-actions">
-        <button type="button" id="playAgainBtn" class="control-btn control-btn-primary control-btn-lg">
+        <a
+          id="winGitHubSyncLink"
+          class="control-btn control-btn-primary control-btn-lg control-link-btn"
+          href="#"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Submit Score to GitHub
+        </a>
+        <button type="button" id="playAgainBtn" class="control-btn control-btn-lg">
           Play Again
         </button>
         <button type="button" id="viewLeaderboardBtn" class="control-btn control-btn-lg">
@@ -163,7 +172,18 @@
       </div>
 
       <div class="modal-actions">
-        <button type="button" id="leaderboardDoneBtn" class="control-btn control-btn-primary">Close</button>
+        <a
+          id="leaderboardGitHubSyncLink"
+          class="control-btn control-btn-primary control-link-btn"
+          href="#"
+          target="_blank"
+          rel="noopener noreferrer"
+          hidden
+        >
+          Sync Queued to GitHub
+        </a>
+        <button type="button" id="refreshLeaderboardBtn" class="control-btn">Refresh</button>
+        <button type="button" id="leaderboardDoneBtn" class="control-btn">Close</button>
       </div>
     </div>
   </div>

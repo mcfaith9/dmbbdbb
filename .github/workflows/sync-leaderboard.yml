@@ -1,0 +1,67 @@
+name: Sync Matching Game Leaderboard
+
+on:
+  issues:
+    types: [opened]
+
+concurrency:
+  group: leaderboard-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync-leaderboard:
+    if: startsWith(github.event.issue.title, '[Leaderboard]')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.LEADERBOARD_PAT || github.token }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Merge submission into data/leaderboard.json
+        id: merge
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          LEADERBOARD_PATH: data/leaderboard.json
+        run: node scripts/merge-leaderboard.mjs
+
+      - name: Commit and push updated leaderboard
+        if: steps.merge.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/leaderboard.json
+          git commit -m "Update leaderboard from issue #${{ github.event.issue.number }}"
+          for i in 1 2 3 4 5; do
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "Push conflict on attempt $i, rebasing..."
+            git pull --rebase origin main
+          done
+          echo "Failed to push after retries"
+          exit 1
+
+      - name: Comment and close submission issue
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.LEADERBOARD_PAT || github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          MERGE_VALID: ${{ steps.merge.outputs.valid }}
+          MERGE_MESSAGE: ${{ steps.merge.outputs.message }}
+          JOB_STATUS: ${{ job.status }}
+        run: node scripts/close-issue.mjs

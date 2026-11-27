@@ -223,6 +223,17 @@ body {
   min-height: 46px;
 }
 
+.control-link-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.control-link-btn[hidden] {
+  display: none;
+}
+
 .control-btn:focus-visible,
 .control-select:focus-visible,
 .memory-card:focus-visible,
